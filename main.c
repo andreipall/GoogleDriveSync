@@ -28,25 +28,10 @@ struct MemoryStruct {
 	size_t size;
 };
 
-static size_t file_write_callback(void *ptr, size_t size, size_t nmemb, FILE *stream) {
+static size_t file_write_callback(void *ptr, size_t size, size_t nmemb,
+		FILE *stream) {
 	return fwrite(ptr, size, nmemb, stream);
 }
-
-static GdkPixbuf *create_pixbuf(const gchar * filename) {
-
-   GdkPixbuf *pixbuf;
-   GError *error = NULL;
-   pixbuf = gdk_pixbuf_new_from_file(filename, &error);
-
-   if (!pixbuf) {
-
-      fprintf(stderr, "%s\n", error->message);
-      g_error_free(error);
-   }
-
-   return pixbuf;
-}
-
 
 static void download_file(gpointer data) {
 	CURL *curl;
@@ -119,6 +104,9 @@ static gchar* getJSON(gchar *url) {
 
 static void download_photos(GtkWidget *widget, gpointer data) {
 	struct DownloadButton *downloadButton = (struct DownloadButton*) data;
+	gboolean result = FALSE;
+	GError *error;
+	error = NULL;
 
 	GdkDisplay *display = gdk_display_get_default();
 	GdkCursor *watchCursor = gdk_cursor_new_for_display(display, GDK_WATCH);
@@ -138,25 +126,24 @@ static void download_photos(GtkWidget *widget, gpointer data) {
 		fprintf(stderr, "Could not read config file %s\n", CONFIG_FILE);
 		return;
 	}
-	gchar *folders_url = g_key_file_get_string(gkf, "URLS", "folders", NULL);
-	gchar *photos_url = g_key_file_get_string(gkf, "URLS", "photos", NULL);
+	gchar *folders_url = g_key_file_get_string(gkf, "URLS", "folders", &error);
+	gchar *photos_url = g_key_file_get_string(gkf, "URLS", "photos", &error);
 	gchar *remove_old_url = g_key_file_get_string(gkf, "URLS", "remove_old",
-	NULL);
+			&error);
 	gchar *folders_json = getJSON(folders_url);
 	//Parse JSON
 	JsonParser *parser;
 	JsonNode *root;
-	GError *error;
-	error = NULL;
+
 	parser = json_parser_new();
-	gboolean result = json_parser_load_from_data(parser, folders_json,
-			strlen(folders_json), NULL);
+	result = json_parser_load_from_data(parser, folders_json, -1, &error);
 	if (result) {
 		GtkWidget *button;
 		root = json_parser_get_root(parser);
 		JsonArray *object_array;
 		object_array = json_node_get_array(root);
-		for (int i = 0; i < json_array_get_length(object_array); i++) {
+		guint no_folders = json_array_get_length(object_array);
+		for (guint i = 0; i < no_folders; i++) {
 			JsonNode *node = json_array_get_element(object_array, i);
 			JsonObject *object = json_node_get_object(node);
 			const gchar *folder_name = json_object_get_string_member(object,
@@ -166,6 +153,7 @@ static void download_photos(GtkWidget *widget, gpointer data) {
 					(gchar*) NULL);
 			if (!g_file_test(fullPath, G_FILE_TEST_IS_DIR)) {
 				if (g_mkdir(fullPath, 0755) == 0) {
+					gboolean result1 = FALSE;
 					GtkWidget *row_download_text, *row_download, *label,
 							*label1, *hbox_label, *bar;
 					label = gtk_label_new(folder_name);
@@ -202,15 +190,15 @@ static void download_photos(GtkWidget *widget, gpointer data) {
 					gchar *images_json = getJSON(folder_photos_url);
 					//Parse images
 					JsonParser *images_parser = json_parser_new();
-					gboolean result1 = json_parser_load_from_data(images_parser,
-							images_json, strlen(images_json), NULL);
+					result1 = json_parser_load_from_data(images_parser,
+							images_json, -1, NULL);
 					if (result1) {
 						JsonNode *root1 = json_parser_get_root(images_parser);
 						JsonArray *image_object_array = json_node_get_array(
 								root1);
-						int no_files_in_folder = json_array_get_length(
+						guint no_files_in_folder = json_array_get_length(
 								image_object_array);
-						for (int ii = 0; ii < no_files_in_folder; ii++) {
+						for (guint ii = 0; ii < no_files_in_folder; ii++) {
 							JsonNode *node1 = json_array_get_element(
 									image_object_array, ii);
 							JsonObject *object1 = json_node_get_object(node1);
@@ -234,6 +222,7 @@ static void download_photos(GtkWidget *widget, gpointer data) {
 									percent);
 							while (gtk_events_pending())
 								gtk_main_iteration();
+							g_free(file);
 							g_free(fileFullPath);
 						}
 					}
@@ -278,16 +267,24 @@ static void download_photos(GtkWidget *widget, gpointer data) {
 }
 
 static void activate(GtkApplication *app, gpointer user_data) {
-	GtkWidget *window, *button, *listbox, *box, *hbox, *hbox_label, *chooser,
-			*label, *row_label, *row_buttons;
-	gchar *folder, *current_dir;
+	GtkWidget *window, *button, *listbox, *hbox, *hbox_label, *chooser, *label,
+			*row_label, *row_buttons;
+	gchar *current_dir;
+	GError *err = NULL;
 
 	window = gtk_application_window_new(app);
 	gtk_window_set_title(GTK_WINDOW(window), "Google Drive Sync");
 	gtk_window_set_default_size(GTK_WINDOW(window), 600, -1);
 	gtk_window_set_resizable(GTK_WINDOW(window), FALSE);
-	GdkPixbuf *icon = create_pixbuf("icon.png");
+	//GdkPixbuf *icon = create_pixbuf("icon.png");
+	GdkPixbuf *icon = gdk_pixbuf_new_from_file("icon.png", &err);
 	gtk_window_set_icon(GTK_WINDOW(window), icon);
+	if (!icon) {
+		g_printerr("%s\n", err->message);
+		g_error_free(err);
+	} else {
+		g_object_unref(icon);
+	}
 	listbox = gtk_list_box_new();
 	gtk_list_box_set_selection_mode(GTK_LIST_BOX(listbox), GTK_SELECTION_NONE);
 	label = gtk_label_new(GDS_TEXT);
@@ -328,7 +325,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row_buttons), FALSE);
 
 	gtk_container_add(GTK_CONTAINER(window), listbox);
-	g_object_unref(icon);
+
 	gtk_widget_show_all(window);
 }
 
