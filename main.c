@@ -4,6 +4,7 @@
  *  Created on: Dec 21, 2019
  *      Author: Andrei Pall
  */
+#include <glib-object.h>
 #include <glib/gstdio.h>
 #include <gtk/gtk.h>
 #include <curl/curl.h>
@@ -60,10 +61,10 @@ static size_t write_memory_callback(void *contents, size_t size, size_t nmemb,
 	size_t realsize = size * nmemb;
 	struct MemoryStruct *mem = (struct MemoryStruct*) userp;
 
-	char *ptr = realloc(mem->memory, mem->size + realsize + 1);
+	char *ptr = g_realloc(mem->memory, mem->size + realsize + 1);
 	if (ptr == NULL) {
 		/* out of memory! */
-		printf("not enough memory (realloc returned NULL)\n");
+		g_printf("not enough memory (realloc returned NULL)\n");
 		return 0;
 	}
 
@@ -123,13 +124,28 @@ static void download_photos(GtkWidget *widget, gpointer data) {
 	GKeyFile *gkf = g_key_file_new();
 
 	if (!g_key_file_load_from_file(gkf, CONFIG_FILE, G_KEY_FILE_NONE, NULL)) {
-		fprintf(stderr, "Could not read config file %s\n", CONFIG_FILE);
+		g_printf("Could not read config file %s\n", CONFIG_FILE);
 		return;
 	}
 	gchar *folders_url = g_key_file_get_string(gkf, "URLS", "folders", &error);
+	if (error) {
+		g_print("Unable to parse: %s\n", error->message);
+		g_error_free(error);
+		g_object_unref(folders_url);
+	}
 	gchar *photos_url = g_key_file_get_string(gkf, "URLS", "photos", &error);
+	if (error) {
+		g_print("Unable to parse: %s\n", error->message);
+		g_error_free(error);
+		g_object_unref(photos_url);
+	}
 	gchar *remove_old_url = g_key_file_get_string(gkf, "URLS", "remove_old",
 			&error);
+	if (error) {
+		g_print("Unable to parse: %s\n", error->message);
+		g_error_free(error);
+		g_object_unref(remove_old_url);
+	}
 	gchar *folders_json = getJSON(folders_url);
 	//Parse JSON
 	JsonParser *parser;
@@ -137,6 +153,11 @@ static void download_photos(GtkWidget *widget, gpointer data) {
 
 	parser = json_parser_new();
 	result = json_parser_load_from_data(parser, folders_json, -1, &error);
+	if (error) {
+		g_print("Unable to parse: %s\n", error->message);
+		g_error_free(error);
+		g_object_unref(parser);
+	}
 	if (result) {
 		GtkWidget *button;
 		root = json_parser_get_root(parser);
@@ -184,7 +205,7 @@ static void download_photos(GtkWidget *widget, gpointer data) {
 							row_download, -1);
 					gtk_list_box_row_set_activatable(
 							GTK_LIST_BOX_ROW(row_download), FALSE);
-					gtk_widget_show_all(downloadButton->listbox);
+
 					gchar *folder_photos_url = g_strconcat(photos_url, id,
 							(gchar*) NULL);
 					gchar *images_json = getJSON(folder_photos_url);
@@ -220,10 +241,11 @@ static void download_photos(GtkWidget *widget, gpointer data) {
 							gtk_label_set_text(GTK_LABEL(label1), file_name);
 							gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(bar),
 									percent);
-							while (gtk_events_pending())
-								gtk_main_iteration();
+							gtk_widget_show_all(downloadButton->listbox);
 							g_free(file);
 							g_free(fileFullPath);
+							while (gtk_events_pending())
+								gtk_main_iteration();
 						}
 					}
 					g_object_unref(images_parser);
@@ -317,6 +339,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	gtk_box_pack_end(GTK_BOX(hbox), button, FALSE, FALSE, 0);
 	row_label = gtk_list_box_row_new();
 	gtk_container_add(GTK_CONTAINER(row_label), hbox_label);
+	//gtk_widget_destroy(hbox_label);
 	row_buttons = gtk_list_box_row_new();
 	gtk_container_add(GTK_CONTAINER(row_buttons), hbox);
 	gtk_list_box_insert(GTK_LIST_BOX(listbox), row_label, -1);
@@ -332,6 +355,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 int main(int argc, char **argv) {
 	GtkApplication *app;
 	int status;
+	//g_mem_set_vtable (glib_mem_profiler_table);
 	/* Must initialize libcurl before any threads are started */
 	curl_global_init(CURL_GLOBAL_ALL);
 
@@ -342,5 +366,6 @@ int main(int argc, char **argv) {
 	g_object_unref(app);
 	/* we're done with libcurl, so clean it up */
 	curl_global_cleanup();
+	//g_mem_profile();
 	return status;
 }
